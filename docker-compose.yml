@@ -1,0 +1,62 @@
+#app application, scale this with docker-compose scale app=3
+
+version: '3'
+services:
+  consul:
+    image: consul
+    container_name: consul
+    env_file: .env
+    command: agent -server -ui -client 0.0.0.0 -bootstrap-expect=1
+    ports:
+    - 8500:8500
+    restart: on-failure:10
+  registrator:
+    image: gliderlabs/registrator:latest
+    container_name: registrator
+    env_file: .env
+    # environment:
+    #     # By default when a service is registered against Consul, the state is set to "critical"
+    #     # You can specify the initial health check status.    
+    #     SERVICE_CHECK_INITIAL_STATUS: passing
+    links:
+      - consul
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock
+    # -internal: Use exposed ports instead of published ports
+    command: -internal consul://consul:8500
+    depends_on:
+      - consul
+    restart: on-failure:10
+  nginx:
+    build: .
+    image: nginx-consul-template:latest
+    container_name: lb
+    env_file: .env
+    environment:
+      SERVICE_NAME: router
+    ports:
+      - 80:80
+    links:
+      - consul
+    volumes:
+      - /Users/oucb/ohmymy/consul_registrator_nginx/nginx.conf.ctmpl:/etc/consul-templates/nginx.conf.ctmpl
+    depends_on:
+      - registrator
+    restart: on-failure:10
+  app:
+      image: python:2.7-alpine
+      env_file: .env
+      environment:
+        SERVICE_NAME: app
+        SERVICE_TAGS: actorcloud
+        SERVICE_CHECK_HTTP: /
+        SERVICE_CHECK_INTERVAL: 5s
+        SERVICE_CHECK_TIMEOUT: 3s
+      command: sh -c "echo app > /tmp/index.html; cd /tmp/; python -m SimpleHTTPServer 8080"
+      expose:
+        - "8080"
+      # ports:
+      #  - 8080-8088:8080
+      depends_on:
+        - registrator
+      restart: on-failure:10
